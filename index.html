@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F1 25 · Paddock</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;600;800&display=swap" />
+</head>
+<body>
+  <div id="app">
+    <div id="topbar"></div>
+    <div class="wall">
+      <!-- LEFT COLUMN -->
+      <div class="col left">
+        <div class="panel" id="tower"></div>
+        <div class="panel" id="log"></div>
+      </div>
+
+      <!-- CENTER COLUMN -->
+      <div class="col center-col">
+        <div class="panel" id="cockpit"></div>
+        <div class="panel" id="chart"></div>
+        <div class="panel" id="tyres"></div>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="col right">
+        <div class="panel" id="map"></div>
+        <div class="panel" id="ers"></div>
+        <div class="panel" id="history"></div>
+        <div class="panel" id="info"></div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
