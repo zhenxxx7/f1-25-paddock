@@ -20,10 +20,12 @@ export {
 const state = {
   connected: false,
   badFormat: null,        // non-2025 UDP format detected by the backend
+  streams: [],            // active telemetry streams on the server
+  streamId: null,         // stream this dashboard is watching
   packetCount: 0,
   lastPacketAt: 0,
   playerCarIndex: 0,
-  watchingCarIndex: 0,    // which car the dashboard focuses on (defaults to player)
+  watchingCarIndex: null, // which car the dashboard focuses on (null = follow the player)
   session: null,
   participants: null,
   laps: null,
@@ -68,6 +70,46 @@ export function getState() { return state; }
 export function setWatch(idx) {
   state.watchingCarIndex = idx;
   scheduleNotify();
+}
+
+// ---- stream selection -------------------------------------------------------
+// The server hosts one stream per telemetry sender; the dashboard watches one.
+export function setStream(id) {
+  if (id === state.streamId) return;
+  state.streamId = id;
+  resetSessionState();
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'subscribe', stream: id }));
+  }
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('stream', id);
+    history.replaceState(null, '', u);
+  } catch { /* non-browser env */ }
+  scheduleNotify();
+}
+
+// Pick a stream automatically: URL ?stream= wins, otherwise a lone stream.
+function autoPickStream() {
+  if (state.streamId && state.streams.some(s => s.id === state.streamId)) return;
+  let want = null;
+  try { want = new URL(location.href).searchParams.get('stream'); } catch { /* ignore */ }
+  if (want && state.streams.some(s => s.id === want)) return setStream(want);
+  if (state.streams.length === 1) return setStream(state.streams[0].id);
+}
+
+// Clear everything that belongs to a session/stream (used on switch + reset).
+function resetSessionState() {
+  Object.assign(state, {
+    session: null, participants: null, laps: null, telemetry: null,
+    status: null, damage: null, setups: null, motion: null, motionEx: null,
+    finalClassification: null, badFormat: null, packetCount: 0,
+    playerCarIndex: 0, watchingCarIndex: null,
+  });
+  state.histories = {};
+  state.tyreSets = {};
+  state.events = [];
+  bus.emit('stream-reset');
 }
 
 // ---- packet ingestion -----------------------------------------------------
@@ -127,7 +169,12 @@ let reconnectTimer = null;
 export function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { state.connected = true; scheduleNotify(); };
+  ws.onopen = () => {
+    state.connected = true;
+    // Re-subscribe after a reconnect; the server socket starts unsubscribed.
+    if (state.streamId) ws.send(JSON.stringify({ type: 'subscribe', stream: state.streamId }));
+    scheduleNotify();
+  };
   ws.onclose = () => {
     state.connected = false;
     scheduleNotify();
@@ -144,6 +191,14 @@ export function connect() {
       scheduleNotify();
     } else if (msg.type === 'packet') {
       applyPacket(msg.packetId, msg.packet);
+    } else if (msg.type === 'streams') {
+      state.streams = msg.streams || [];
+      autoPickStream();
+      scheduleNotify();
+    } else if (msg.type === 'reset') {
+      // The watched stream started a new session.
+      resetSessionState();
+      scheduleNotify();
     } else if (msg.type === 'format') {
       // Game is sending a UDP format we can't parse (wrong in-game setting).
       state.badFormat = msg.format;

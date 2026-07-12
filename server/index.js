@@ -1,8 +1,10 @@
 // F1 25 Paddock backend.
 //  - Listens for F1 25 UDP telemetry on F1_UDP_PORT (default 20777).
-//  - Parses each packet and relays it to browser clients over WebSocket.
+//  - Separates senders into independent streams (keyed by source IP), so any
+//    number of players can point their game at the same port without their
+//    data colliding. Browsers subscribe to one stream over WebSocket.
 //  - Serves the built frontend (../dist) over HTTP on HTTP_PORT (default 3000).
-//  - Records each completed player lap to disk for later replay.
+//  - Records each completed player lap to disk (per stream) for later replay.
 //
 // Run with:  npm start   (after `npm run build`)
 //            npm run dev (runs vite + this server together)
@@ -13,9 +15,11 @@ import { existsSync } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSocket } from 'node:dgram';
+import { createHash } from 'node:crypto';
 
 import { WebSocketServer } from 'ws';
-import { parsePacket, HEADER_SIZE, MAX_CARS } from './parser.js';
+import { parsePacket, MAX_CARS } from './parser.js';
+import { driverName, trackName } from '../shared/enums.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -23,6 +27,7 @@ const ROOT = join(__dirname, '..');
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
 const F1_UDP_PORT = parseInt(process.env.F1_UDP_PORT || '20777', 10);
 const LAPS_DIR = join(ROOT, 'recordings');
+const STREAM_IDLE_MS = 15 * 60_000; // forget a stream after 15 min of silence
 
 // Sane throughput limits so the browser never gets flooded. High-rate
 // packets (motion/telemetry/status) are throttled per type; low-rate
@@ -34,26 +39,70 @@ const MAX_HZ = {
   10: 10,  // car damage
   13: 30,  // motion ex
 };
-const lastSent = {};
 
-// ---- state: latest snapshot per packet type -------------------------------
-const state = {
-  badFormat: null,      // set when the game sends a UDP format we can't parse
-  playerCarIndex: 0,
-  session: null,
-  participants: null,
-  laps: null,
-  telemetry: null,
-  status: null,
-  damage: null,
-  setups: null,
-  motionEx: null,
-  histories: {},        // carIdx -> session-history packet
-  tyreSets: {},         // carIdx -> tyre-sets packet
-  finalClassification: null,
-};
+// ---- streams: one isolated state per telemetry sender ----------------------
+// Every game instance that sends packets gets its own stream, keyed by the
+// packet's source IP. The public stream id is a short hash so raw IPs are
+// never exposed to viewers.
+const streams = new Map();     // source address -> stream
+const streamsById = new Map(); // public id -> stream
 
-// ---- WebSocket plumbing ---------------------------------------------------
+function freshState() {
+  return {
+    playerCarIndex: 0,
+    session: null, participants: null, laps: null, telemetry: null,
+    status: null, damage: null, setups: null, motionEx: null,
+    histories: {},        // carIdx -> session-history packet
+    tyreSets: {},         // carIdx -> tyre-sets packet
+    finalClassification: null,
+  };
+}
+
+function getOrCreateStream(addr) {
+  let s = streams.get(addr);
+  if (!s) {
+    const id = createHash('sha1').update(addr).digest('hex').slice(0, 8);
+    s = {
+      id, addr,
+      label: null, track: null,
+      sessionUID: null, badFormat: null, lastPacketAt: 0,
+      state: freshState(),
+      lastSent: {},
+      lapBuffers: new Map(), seenLapNums: new Map(),
+    };
+    streams.set(addr, s);
+    streamsById.set(id, s);
+    console.log(`[stream] new sender ${addr} -> stream ${id}`);
+    pushStreams();
+  }
+  return s;
+}
+
+function streamsSummary() {
+  const now = Date.now();
+  return [...streamsById.values()].map(s => ({
+    id: s.id,
+    label: s.label || 'Driver',
+    track: s.track,
+    live: now - s.lastPacketAt < 5000,
+  }));
+}
+
+// Drop streams that have been silent for a while.
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const [addr, s] of streams) {
+    if (now - s.lastPacketAt > STREAM_IDLE_MS) {
+      streams.delete(addr);
+      streamsById.delete(s.id);
+      changed = true;
+    }
+  }
+  if (changed) pushStreams();
+}, 60_000);
+
+// ---- HTTP -------------------------------------------------------------------
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -61,25 +110,36 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
       ok: true, udp: F1_UDP_PORT, clients: wss.clients.size,
-      format: state.badFormat ? `unsupported:${state.badFormat}` : '2025',
+      streams: streamsSummary(),
     }));
     return;
   }
 
+  if (url.pathname === '/api/streams') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(streamsSummary()));
+    return;
+  }
+
   // Saved-lap recording endpoints (used by the replay panel).
+  // Recordings live in recordings/<streamId>/; the legacy root is still
+  // listed when no stream is given.
   if (url.pathname === '/api/laps') {
+    const streamId = url.searchParams.get('stream') || '';
+    if (streamId && !/^[\w-]+$/.test(streamId)) { res.writeHead(400); res.end('bad stream'); return; }
+    const dir = streamId ? join(LAPS_DIR, streamId) : LAPS_DIR;
     try {
-      await mkdir(LAPS_DIR, { recursive: true });
-      const files = (await readdir(LAPS_DIR)).filter(f => f.endsWith('.json')).sort().reverse();
+      await mkdir(dir, { recursive: true });
+      const files = (await readdir(dir)).filter(f => f.endsWith('.json')).sort().reverse();
       const laps = await Promise.all(files.slice(0, 200).map(async f => {
         try {
-          const raw = await readFile(join(LAPS_DIR, f), 'utf8');
+          const raw = await readFile(join(dir, f), 'utf8');
           const j = JSON.parse(raw);
           return {
             file: f,
             track: j.track, team: j.team, driver: j.driver,
             lapTimeMs: j.lapTimeMs, lapNumber: j.lapNumber,
-            mtime: (await stat(join(LAPS_DIR, f))).mtimeMs,
+            mtime: (await stat(join(dir, f))).mtimeMs,
           };
         } catch { return null; }
       }));
@@ -92,10 +152,15 @@ const server = createServer(async (req, res) => {
   }
 
   if (url.pathname.startsWith('/api/laps/')) {
-    const f = url.pathname.slice('/api/laps/'.length);
-    if (!/^[\w.-]+\.json$/.test(f)) { res.writeHead(400); res.end('bad file'); return; }
+    // /api/laps/<file>  (legacy root)  or  /api/laps/<streamId>/<file>
+    const parts = url.pathname.slice('/api/laps/'.length).split('/');
+    const file = parts.pop();
+    const streamId = parts.pop() || '';
+    if (!/^[\w.-]+\.json$/.test(file) || (streamId && !/^[\w-]+$/.test(streamId)) || parts.length) {
+      res.writeHead(400); res.end('bad path'); return;
+    }
     try {
-      const raw = await readFile(join(LAPS_DIR, f), 'utf8');
+      const raw = await readFile(join(LAPS_DIR, streamId, file), 'utf8');
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(raw);
     } catch { res.writeHead(404); res.end('not found'); }
@@ -144,38 +209,56 @@ async function serveStatic(req, res, url) {
   }
 }
 
+// ---- WebSocket plumbing -------------------------------------------------------
 const wss = new WebSocketServer({ server, path: '/ws' });
 // ws re-emits the HTTP server's errors here; binding failures are already
 // handled by listenHttp, so just keep the re-emit from crashing the process.
 wss.on('error', () => {});
 
-function broadcast(msg) {
+function broadcastAll(msg) {
+  const data = JSON.stringify(msg);
+  for (const c of wss.clients) if (c.readyState === 1) c.send(data);
+}
+
+function broadcastToStream(streamId, msg) {
   const data = JSON.stringify(msg);
   for (const c of wss.clients) {
-    if (c.readyState === 1) c.send(data);
+    if (c.readyState === 1 && c.streamId === streamId) c.send(data);
   }
 }
 
-// Send the current full snapshot to a freshly connected client so the
-// dashboard is populated immediately instead of waiting for the next tick.
-function sendSnapshot(client) {
+function pushStreams() {
+  broadcastAll({ type: 'streams', streams: streamsSummary() });
+}
+
+// Send the subscribed stream's full snapshot so the dashboard is populated
+// immediately instead of waiting for the next packet of each type.
+function sendSnapshot(client, s) {
   const snap = { type: 'snapshot', data: {} };
   for (const k of ['session', 'participants', 'laps', 'telemetry', 'status', 'damage', 'setups', 'motionEx', 'finalClassification']) {
-    if (state[k]) snap.data[k] = state[k];
+    if (s.state[k]) snap.data[k] = s.state[k];
   }
-  snap.data.histories = state.histories;
-  snap.data.tyreSets = state.tyreSets;
-  snap.data.playerCarIndex = state.playerCarIndex;
-  snap.data.badFormat = state.badFormat;
+  snap.data.histories = s.state.histories;
+  snap.data.tyreSets = s.state.tyreSets;
+  snap.data.playerCarIndex = s.state.playerCarIndex;
+  snap.data.badFormat = s.badFormat;
   client.send(JSON.stringify(snap));
 }
 
 wss.on('connection', (ws) => {
-  sendSnapshot(ws);
+  ws.streamId = null;
+  ws.send(JSON.stringify({ type: 'streams', streams: streamsSummary() }));
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === 'replay') broadcast({ type: 'replay', data: msg.data });
+      if (msg.type === 'subscribe' && typeof msg.stream === 'string') {
+        const s = streamsById.get(msg.stream);
+        if (!s) return;
+        ws.streamId = s.id;
+        sendSnapshot(ws, s);
+      } else if (msg.type === 'replay') {
+        broadcastToStream(ws.streamId, { type: 'replay', data: msg.data });
+      }
     } catch { /* ignore */ }
   });
 });
@@ -191,95 +274,117 @@ udp.on('error', (e) => {
   console.error('[udp] error', e);
 });
 
-udp.on('message', (buf) => {
+udp.on('message', (buf, rinfo) => {
+  if (buf.length < 2) return;
+  const s = getOrCreateStream(rinfo.address);
+  s.lastPacketAt = Date.now();
+
   // The game stamps every packet with its UDP format (2025 for F1 25 and its
   // season/DLC updates). Anything else means the in-game "UDP Format" setting
-  // is wrong (or a future game) — tell the dashboard instead of failing silently.
-  if (buf.length >= 2) {
-    const fmt = buf.readUInt16LE(0);
-    if (fmt !== 2025) {
-      if (state.badFormat !== fmt) {
-        state.badFormat = fmt;
-        console.warn(`[udp] receiving UDP format ${fmt}, need 2025 — in F1 25 set Settings > Telemetry > UDP Format = 2025`);
-        broadcast({ type: 'format', format: fmt });
-      }
-      return;
+  // is wrong (or a future game) — tell that stream's viewers instead of
+  // failing silently.
+  const fmt = buf.readUInt16LE(0);
+  if (fmt !== 2025) {
+    if (s.badFormat !== fmt) {
+      s.badFormat = fmt;
+      console.warn(`[udp] ${rinfo.address} sends UDP format ${fmt}, need 2025 — in F1 25 set Settings > Telemetry > UDP Format = 2025`);
+      broadcastToStream(s.id, { type: 'format', format: fmt });
     }
-    if (state.badFormat) {
-      state.badFormat = null;
-      broadcast({ type: 'format', format: null });
-    }
+    return;
+  }
+  if (s.badFormat) {
+    s.badFormat = null;
+    broadcastToStream(s.id, { type: 'format', format: null });
   }
 
   const pkt = parsePacket(buf);
   if (!pkt || pkt.__error) return;
-  const { header, ...rest } = pkt;
+  const { header } = pkt;
   const packetId = header.packetId;
 
-  // Track the player car index from every packet's header.
+  // A new session (restart, next weekend session, flashback to menus) resets
+  // this stream so viewers don't see stale data from the previous session.
+  if (header.sessionUID && header.sessionUID !== '0') {
+    if (s.sessionUID && s.sessionUID !== header.sessionUID) {
+      s.state = freshState();
+      s.lapBuffers = new Map();
+      s.seenLapNums = new Map();
+      broadcastToStream(s.id, { type: 'reset' });
+    }
+    s.sessionUID = header.sessionUID;
+  }
+
   if (header.playerCarIndex !== undefined && header.playerCarIndex < MAX_CARS) {
-    state.playerCarIndex = header.playerCarIndex;
+    s.state.playerCarIndex = header.playerCarIndex;
   }
 
   // Keep the latest of each type, plus keyed stores for per-car packets.
   switch (packetId) {
-    case 1: state.session = pkt; break;
-    case 4: state.participants = pkt; break;
-    case 2: state.laps = pkt; break;
-    case 6: state.telemetry = pkt; break;
-    case 7: state.status = pkt; break;
-    case 10: state.damage = pkt; break;
-    case 5: state.setups = pkt; break;
-    case 13: state.motionEx = pkt; break;
-    case 8: state.finalClassification = pkt; break;
-    case 11: state.histories[rest.carIdx] = pkt; break;
-    case 12: state.tyreSets[rest.carIdx] = pkt; break;
+    case 1: s.state.session = pkt; break;
+    case 4: s.state.participants = pkt; break;
+    case 2: s.state.laps = pkt; break;
+    case 6: s.state.telemetry = pkt; break;
+    case 7: s.state.status = pkt; break;
+    case 10: s.state.damage = pkt; break;
+    case 5: s.state.setups = pkt; break;
+    case 13: s.state.motionEx = pkt; break;
+    case 8: s.state.finalClassification = pkt; break;
+    case 11: s.state.histories[pkt.carIdx] = pkt; break;
+    case 12: s.state.tyreSets[pkt.carIdx] = pkt; break;
   }
 
-  // Throttle high-frequency packets to keep the browser responsive.
+  // Label the stream for the picker: player name (or driver) + track.
+  if (packetId === 4) {
+    const p = s.state.participants?.participants?.[s.state.playerCarIndex];
+    const name = p ? (p.name || driverName(p.driverId)) : null;
+    if (name && name !== s.label) { s.label = name; pushStreams(); }
+  }
+  if (packetId === 1) {
+    const t = trackName(pkt.trackId);
+    if (t !== s.track) { s.track = t; pushStreams(); }
+  }
+
+  // Throttle high-frequency packets per stream to keep browsers responsive.
   const maxHz = MAX_HZ[packetId];
   if (maxHz) {
     const now = Date.now();
     const minGap = 1000 / maxHz;
-    if (lastSent[packetId] && now - lastSent[packetId] < minGap) return;
-    lastSent[packetId] = now;
+    if (s.lastSent[packetId] && now - s.lastSent[packetId] < minGap) return;
+    s.lastSent[packetId] = now;
   }
 
-  broadcast({ type: 'packet', packetId, packet: pkt });
+  broadcastToStream(s.id, { type: 'packet', packetId, packet: pkt });
 
-  // Lap recording: whenever the player completes a lap, store the telemetry
-  // sample stream captured since the previous lap completion.
-  if (packetId === 2 && state.participants) {
-    recordPlayerLap(rest, header);
+  // Lap recording: whenever this stream's player completes a lap, store the
+  // telemetry sample stream captured since the previous lap completion.
+  if (packetId === 2 && s.state.participants) {
+    recordPlayerLap(s, pkt);
   }
 });
 
 // ---- lap recording --------------------------------------------------------
-const lapBuffers = new Map(); // carIdx -> { lapNum, samples: [] }
-const seenLapNums = new Map(); // carIdx -> last completed lap num
-
-function recordPlayerLap(lapDataPkt, header) {
-  const idx = state.playerCarIndex;
+function recordPlayerLap(s, lapDataPkt) {
+  const idx = s.state.playerCarIndex;
   const car = lapDataPkt.lapData?.[idx];
   if (!car) return;
   // A lap "completes" when currentLapNum increments relative to the lap
   // we were buffering samples for.
-  const prev = seenLapNums.get(idx) ?? 0;
+  const prev = s.seenLapNums.get(idx) ?? 0;
   if (car.currentLapNum <= prev) {
-    pushSample(idx, car);
+    pushSample(s, idx, car);
     return;
   }
   // Lap boundary crossed: flush the previous lap, start a new buffer.
-  flushLap(idx, car.currentLapNum - 1, car.lastLapTimeInMS);
-  seenLapNums.set(idx, car.currentLapNum);
+  flushLap(s, car.currentLapNum - 1, car.lastLapTimeInMS);
+  s.seenLapNums.set(idx, car.currentLapNum);
 }
 
-function pushSample(idx, car) {
-  if (!lapBuffers.has(idx)) lapBuffers.set(idx, { lapNum: car.currentLapNum, samples: [] });
-  const buf = lapBuffers.get(idx);
-  const t = state.telemetry?.carTelemetryData?.[idx];
-  const s = state.status?.carStatusData?.[idx];
-  const d = state.damage?.carDamageData?.[idx];
+function pushSample(s, idx, car) {
+  if (!s.lapBuffers.has(idx)) s.lapBuffers.set(idx, { lapNum: car.currentLapNum, samples: [] });
+  const buf = s.lapBuffers.get(idx);
+  const t = s.state.telemetry?.carTelemetryData?.[idx];
+  const st = s.state.status?.carStatusData?.[idx];
+  const d = s.state.damage?.carDamageData?.[idx];
   if (!t) return;
   buf.samples.push({
     t: car.currentLapTimeInMS / 1000,
@@ -288,21 +393,19 @@ function pushSample(idx, car) {
     throttle: t.throttle, brake: t.brake, steer: t.steer, drs: t.drs,
     brakeTemp: t.brakesTemperature, tyreSurfaceTemp: t.tyresSurfaceTemperature,
     tyrePressure: t.tyresPressure,
-    fuel: s?.fuelInTank, ersStore: s?.ersStoreEnergy, ersDeploy: s?.ersDeployedThisLap,
+    fuel: st?.fuelInTank, ersStore: st?.ersStoreEnergy, ersDeploy: st?.ersDeployedThisLap,
     tyreWear: d?.tyresWear,
   });
 }
 
-async function flushLap(idx, lapNum, lapTimeMs) {
-  const buf = lapBuffers.get(idx);
-  lapBuffers.set(idx, { lapNum: lapNum + 1, samples: [] });
+async function flushLap(s, lapNum, lapTimeMs) {
+  const buf = s.lapBuffers.get(s.state.playerCarIndex);
+  s.lapBuffers.set(s.state.playerCarIndex, { lapNum: lapNum + 1, samples: [] });
   if (!buf || buf.samples.length < 10) return;
-  // Only persist the player car's laps.
-  if (idx !== state.playerCarIndex) return;
   if (!lapTimeMs || lapTimeMs <= 0) return;
 
-  const session = state.session ?? {};
-  const part = state.participants?.participants?.[idx] ?? {};
+  const session = s.state.session ?? {};
+  const part = s.state.participants?.participants?.[s.state.playerCarIndex] ?? {};
   const meta = {
     recordedAt: new Date().toISOString(),
     track: session.trackId ?? -1,
@@ -317,10 +420,11 @@ async function flushLap(idx, lapNum, lapTimeMs) {
     samples: buf.samples,
   };
   try {
-    await mkdir(LAPS_DIR, { recursive: true });
+    const dir = join(LAPS_DIR, s.id);
+    await mkdir(dir, { recursive: true });
     const fname = `${meta.recordedAt.replace(/[:.]/g, '-')}_lap${lapNum}.json`;
-    await writeFile(join(LAPS_DIR, fname), JSON.stringify(meta));
-    broadcast({ type: 'lap-saved', data: { file: fname, lapTimeMs, lapNumber: lapNum } });
+    await writeFile(join(dir, fname), JSON.stringify(meta));
+    broadcastToStream(s.id, { type: 'lap-saved', data: { file: fname, lapTimeMs, lapNumber: lapNum } });
   } catch (e) {
     console.error('[record] failed', e.message);
   }

@@ -1,5 +1,5 @@
 import { el } from '../lib/dom.js';
-import { events, formatLapTime, trackName, teamName } from '../lib/store.js';
+import { events, formatLapTime, trackName, teamName, getState } from '../lib/store.js';
 
 // Saved-lap browser + replay viewer. Fetches /api/laps from the backend,
 // lists each recorded lap, and on click fetches the full sample stream and
@@ -7,9 +7,10 @@ import { events, formatLapTime, trackName, teamName } from '../lib/store.js';
 let lapsCache = [];
 
 export function History(state) {
-  // Refresh the list whenever a new lap is saved.
+  // Refresh the list whenever a new lap is saved or the stream changes.
   if (!History._wired) {
     events.on('lap-saved', () => load().then(render));
+    events.on('stream-reset', () => { lapsCache = []; load().then(render); });
     History._wired = true;
     load().then(render);
   }
@@ -37,7 +38,8 @@ export function History(state) {
 
 async function load() {
   try {
-    const r = await fetch('/api/laps');
+    const streamId = getState().streamId;
+    const r = await fetch('/api/laps' + (streamId ? `?stream=${streamId}` : ''));
     if (r.ok) lapsCache = await r.json();
   } catch { /* offline / not built */ }
 }
@@ -49,7 +51,8 @@ function render() { renderFn(); }
 // ---- replay modal ---------------------------------------------------------
 async function openReplay(file) {
   try {
-    const r = await fetch(`/api/laps/${file}`);
+    const streamId = getState().streamId;
+    const r = await fetch(streamId ? `/api/laps/${streamId}/${file}` : `/api/laps/${file}`);
     if (!r.ok) return;
     const lap = await r.json();
     showReplayModal(lap);

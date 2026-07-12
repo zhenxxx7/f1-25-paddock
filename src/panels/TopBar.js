@@ -23,6 +23,7 @@ export function TopBar(state) {
       ] : el('span.faint.mono', 'awaiting telemetry…'),
     ),
     el('div.spacer')(),
+    streamPicker(state),
     state.badFormat ? el('span.tag.red', `UDP FORMAT ${state.badFormat} · SET 2025 IN GAME`) : '',
     part ? el('span.chip.driver')(
       el('span.chip-k', { style: `color:${teamColour(part.teamId)}` }, '●'),
@@ -39,7 +40,22 @@ function chip(k, v) {
   return el('span.chip')(el('span.chip-k', k), el('span.chip-v', v));
 }
 
-import { trackName, SESSION_TYPES, WEATHER, teamColour, driverName } from '../lib/store.js';
+// When several games feed this server, viewers pick which stream to watch.
+function streamPicker(state) {
+  if (!state.streams || state.streams.length < 2) return '';
+  return el('select.stream-select', {
+    onchange: (e) => e.target.value && setStream(e.target.value),
+    title: 'Choose which player to watch',
+  })(
+    !state.streamId ? el('option', { value: '', selected: true, disabled: true }, 'SELECT STREAM…') : '',
+    state.streams.map(s => el('option', {
+      value: s.id,
+      selected: s.id === state.streamId,
+    }, `${s.label}${s.track ? ' · ' + s.track : ''}${s.live ? '' : ' (idle)'}`)),
+  );
+}
+
+import { trackName, SESSION_TYPES, WEATHER, teamColour, driverName, setStream } from '../lib/store.js';
 function trackNameOf(s) { return s.trackId != null ? trackName(s.trackId) : 'Unknown'; }
 function sessionTypeOf(s) { return SESSION_TYPES[s.sessionType] ?? 'Session'; }
 function weatherOf(s) {

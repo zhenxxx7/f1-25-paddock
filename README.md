@@ -53,10 +53,13 @@ In the game: **Options → Settings → Telemetry / UDP Settings**
 
 ## 2. Run the dashboard
 
-Requires **Node.js 18+** (you have v22).
+Requires **Node.js 18+**. The project can live in any folder — it never reads
+the game's files, it only listens for the UDP packets the game broadcasts.
 
 ```bash
-cd "D:\SteamLibrary\steamapps\common\F1 25\f1-25-paddock"
+# clone anywhere you like
+git clone https://github.com/zhenxxx7/f1-25-paddock.git
+cd f1-25-paddock
 
 # install once
 npm install
@@ -90,6 +93,24 @@ Point F1 25's UDP IP at this PC's LAN address, then open
 # defaults: HTTP 3000, UDP 20777
 HTTP_PORT=8080 F1_UDP_PORT=20777 npm start
 ```
+
+### Multiple players on one server (shared VPS / LAN party)
+
+Everyone points their game at the **same** IP and port — no per-player setup.
+The server separates senders by source address into independent **streams**:
+
+- Each game instance gets its own stream (short anonymous id, labelled with
+  the player's name and track once telemetry arrives).
+- The dashboard shows a stream picker in the top bar when more than one
+  stream is live; with a single stream it attaches automatically.
+- Share a direct link to one player's wall with `http://<server>:3000/?stream=<id>`.
+- Lap recordings are kept per stream (`recordings/<streamId>/`), and a stream
+  is forgotten after 15 minutes of silence.
+- Starting a new session in-game resets only that player's stream.
+
+One caveat: senders are keyed by source IP, so two PCs behind the same home
+NAT arrive as one stream. For that case run a second instance on another port
+(`F1_UDP_PORT=20778 HTTP_PORT=3001 npm start`).
 
 ### Development mode (hot-reloading frontend)
 

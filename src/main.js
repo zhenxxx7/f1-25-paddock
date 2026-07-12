@@ -1,7 +1,7 @@
 import './styles.css';
-import { subscribe, connect, getState } from './lib/store.js';
+import { subscribe, connect, getState, events } from './lib/store.js';
 import { bindRegion } from './lib/dom.js';
-import { learnTrack } from './panels/TrackMap.js';
+import { learnTrack, resetTrack } from './panels/TrackMap.js';
 
 import { TopBar } from './panels/TopBar.js';
 import { TimingTower } from './panels/TimingTower.js';
@@ -33,8 +33,10 @@ subscribe(bindRegion(() => slots('info'), InfoPanels));
 setHistoryRender(() => bindRegion(() => slots('history'), History)(getState()));
 setInfoRender(() => bindRegion(() => slots('info'), InfoPanels)(getState()));
 
-// Track outline is learned incrementally from every motion packet.
+// Track outline is learned incrementally from every motion packet, and
+// forgotten when the dashboard switches stream or the session restarts.
 subscribe((state) => learnTrack(state));
+events.on('stream-reset', resetTrack);
 
 connect();
 

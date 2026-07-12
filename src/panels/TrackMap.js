@@ -89,6 +89,13 @@ let lastTraceFrame = -1;
 function getTrace() { return trace; }
 function getBounds() { return bounds; }
 
+// Forget the learned outline (stream switch / new session).
+export function resetTrack() {
+  trace = [];
+  bounds = null;
+  lastTraceFrame = -1;
+}
+
 function seedBounds(motion) {
   const m = motion.carMotionData[motion.header?.playerCarIndex || 0];
   if (!m) return;

@@ -148,6 +148,26 @@ body {
 
 .topbar .spacer { flex: 1; }
 
+.stream-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(46, 229, 255, 0.35);
+  border-radius: 5px;
+  padding: 4px 22px 4px 9px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%232ee5ff'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.stream-select:focus { outline: none; border-color: var(--accent); }
+.stream-select option { background: var(--surface-2); color: var(--text); }
+
 .conn {
   display: flex;
   align-items: center;
