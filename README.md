@@ -4,39 +4,25 @@ A paddock-wall style web dashboard for **F1 25**. It captures the game's live
 UDP telemetry stream and shows everything in one browser window: live driver
 cockpit, full-car timing tower, tyre temps/wear, ERS & damage, a track map with
 live car positions, rolling speed/RPM charts, a race-control event feed, and a
-saved-lap replay viewer.
+saved-lap replay viewer — all in a dark broadcast-style "pit wall" theme.
 
-```
- F1·25 PADDOCK    Melbourne · Race · L58    Lando Norris      ● LIVE · 184,302 pkt
-┌─────────────┬───────────────────────────────┬──────────────────────┐
-│ TIMING      │ DRIVER COCKPIT                │ TRACK MAP            │
-│ TOWER       │   327                         │      • • •           │
-│  P1  VER    │  KM/H          7              │    •       •         │
-│  P2  LEC    │  ▓▓▓▓▓▓▓▓▓▓▓▓▓ RPM LEDs      │   •   ●     •         │
-│  P3  NOR ◀  │  THROTTLE ▓▓▓▓░  BRAKE ░░░░   │    • • • •           │
-│  ...        │  LAP 12/58  LAST 1:19.231     │                      │
-│             ├───────────────────────────────┼──────────────────────┤
-│ RACE        │ SPEED & RPM · 60s             │ ERS · FUEL · DAMAGE  │
-│ CONTROL     │  ╱╲    ╱╲╱╲                  │  STORE  3.42 MJ      │
-│ 16:02 FTLP  │ ╱  ╲__╱    ╲___              │  DEPLOY 1.10 MJ      │
-│ 16:01 SPTP  ├───────────────────────────────┼──────────────────────┤
-│             │ TYRES & BRAKES                │ DATA BANK  [SESSION] │
-│             │  FL 104°C  FR 101°C           │  Track: Melbourne    │
-│             │  RL  98°C  RR  99°C           │  Weather: Clear 31°C │
-└─────────────┴───────────────────────────────┴──────────────────────┘
-```
+![F1 25 Paddock dashboard](docs/preview.png)
+
+*The wall mid-race: timing tower, driver cockpit, 60-second speed/RPM trace,
+per-corner tyres, learned track map, ERS/fuel/damage meters, race-control feed,
+saved-lap replay and the session data bank.*
 
 ## What you get
 
 | Panel | Shows |
 | --- | --- |
-| **Timing Tower** | Live position, gap-to-leader, tyre compound dot, PIT/DNF flags for every car. Click a row to focus the dashboard on that car. |
-| **Driver Cockpit** | Big speed, gear, 15-LED RPM bar, throttle/brake bars, lap + sector times, fuel, DRS state. |
-| **Speed & RPM** | Rolling 60-second speed (cyan) + RPM (magenta) trace on canvas. |
-| **Tyres & Brakes** | Per-corner surface/inner temps, pressure (PSI), wear %, brake temp, driving surface (tarmac/grass/etc.). |
-| **ERS · Fuel · Damage** | Battery store/deploy/harvest bars, fuel remaining, and the full damage matrix (wings, floor, gearbox, engine wear, DRS/ERS faults). |
+| **Timing Tower** | Live position, gap-to-leader, tyre compound badge (S/M/H in sidewall colours), PIT/DNF flags for every car. Click a row to focus the dashboard on that car. |
+| **Driver Cockpit** | Big speed, glowing gear indicator, 15-LED RPM bar, throttle/brake bars, lap + sector times, fuel, DRS state. |
+| **Speed & RPM** | Rolling 60-second speed (cyan area trace) + RPM (magenta) on canvas. |
+| **Tyres & Brakes** | Per-corner surface/inner temps (colour-coded), pressure (PSI), wear bar, brake temp, driving surface (tarmac/grass/etc.). |
+| **ERS · Fuel · Damage** | Battery store/deploy/harvest meters, fuel remaining, and the full damage matrix (wings, floor, gearbox, engine wear, DRS/ERS faults). |
 | **Track Map** | Learns the circuit outline from your first lap, then plots every car's live position. Marshal zones light up yellow/blue. |
-| **Race Control** | Decoded event feed: fastest lap, penalties, safety car, overtakes, retirements, start lights, etc. |
+| **Race Control** | Decoded event feed with colour-coded severity dots: fastest lap, penalties, safety car, overtakes, retirements, start lights, etc. |
 | **Lap Replay** | Every lap you complete is saved to disk. Click to open a speed/throttle/brake trace for any lap. |
 | **Data Bank** | Tabbed: full session info + weather forecast, complete car setup, participant grid, final classification. |
 
@@ -102,9 +88,9 @@ npm run dev
 ```
 
 This runs Vite on `:5173` and the backend on `:3000` together. Open
-`http://localhost:5173` — Vite proxies nothing; the frontend connects to the
-WebSocket on its own origin, so use `npm start` for the "real" single-server
-experience, or `npm run dev` while iterating on the UI.
+`http://localhost:5173` — Vite proxies `/ws` and `/api` to the backend, so
+live telemetry works in dev too. If you move the backend (`HTTP_PORT=3210
+npm run dev`), the proxy follows automatically.
 
 ---
 
@@ -123,6 +109,8 @@ F1 25  ──UDP 20777──▶  Node backend (server/index.js)
 - High-frequency packets (motion/telemetry/status) are throttled to 30/30/10 Hz
   before being sent to the browser, so the UI stays responsive even at 60 Hz game
   output.
+- The browser additionally caps full re-renders at ~20 fps — panels rebuild
+  their whole DOM per frame, so this keeps CPU flat without visible lag.
 - A fresh browser connection immediately receives a **snapshot** of the latest of
   each packet type, so you don't stare at an empty screen.
 - Lap recordings land in `f1-25-paddock/recordings/*.json` and are listed in the
@@ -157,12 +145,13 @@ f1-25-paddock/
 │   └── enums.js        track/team/driver/tyre/weather lookup tables
 ├── src/
 │   ├── main.js         wires the store to every panel
-│   ├── styles.css      paddock-wall theme
+│   ├── styles.css      pit-wall design system (palette, panels, meters, tags)
 │   ├── lib/
 │   │   ├── store.js    reactive state + WebSocket client + formatters
 │   │   └── dom.js      tiny hyperscript builder
 │   └── panels/         TopBar, TimingTower, Cockpit, Tyres, ErsDamage,
 │                       TrackMap, SpeedChart, EventLog, History, InfoPanels
+├── docs/               README assets (dashboard screenshot)
 ├── recordings/         saved laps (JSON)
 ├── index.html
 ├── vite.config.js

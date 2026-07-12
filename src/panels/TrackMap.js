@@ -28,10 +28,15 @@ export function TrackMap(state) {
   }
 
   const W = 360, H = 300, pad = 18;
-  const scale = Math.min((W - pad * 2) / (bounds.maxX - bounds.minX), (H - pad * 2) / (bounds.maxY - bounds.minY));
-  const project = (x, y) => [
-    pad + (x - bounds.minX) * scale,
-    H - pad - (y - bounds.minY) * scale, // flip Y (game Y is "north")
+  const spanX = Math.max(1, bounds.maxX - bounds.minX);
+  const spanZ = Math.max(1, bounds.maxZ - bounds.minZ);
+  const scale = Math.min((W - pad * 2) / spanX, (H - pad * 2) / spanZ);
+  // centre the circuit in the viewBox and flip Z (game Z is "north")
+  const ox = (W - spanX * scale) / 2;
+  const oy = (H - spanZ * scale) / 2;
+  const project = (x, z) => [
+    ox + (x - bounds.minX) * scale,
+    H - oy - (z - bounds.minZ) * scale,
   ];
 
   // Sampled track points (learned over time, appended below).
@@ -50,14 +55,20 @@ export function TrackMap(state) {
     if (!m || !laps.lapData[i] || laps.lapData[i].resultStatus === 0) continue;
     const [px, py] = project(m.worldPositionX, m.worldPositionZ);
     const part = state.participants?.participants?.[i];
-    const fill = i === state.playerCarIndex ? '#2ee06b' : (i === state.watchingCarIndex ? '#00e0ff' : (part ? teamColour(part.teamId) : '#888'));
-    const r = (i === state.playerCarIndex || i === state.watchingCarIndex) ? 5 : 3;
-    cars.push(el('circle', { cx: px, cy: py, r, fill, stroke: '#000', 'stroke-width': 1 }));
+    const isPlayer = i === state.playerCarIndex;
+    const isWatch = i === state.watchingCarIndex;
+    const fill = isPlayer ? '#3be081' : (isWatch ? '#2ee5ff' : (part ? teamColour(part.teamId) : '#6b7688'));
+    const r = (isPlayer || isWatch) ? 5 : 3.2;
+    cars.push(elNS('circle', { cx: px, cy: py, r, fill, stroke: '#04060b', 'stroke-width': 1.5 })());
+    if (isWatch) {
+      cars.push(elNS('circle', { cx: px, cy: py, r: 8.5, fill: 'none', stroke: '#2ee5ff', 'stroke-width': 1, opacity: 0.55 })());
+    }
   }
 
-  const svg = elNS('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: 'auto' })([
-    trackPath && elNS('path', { d: trackPath, fill: 'none', stroke: '#2a3445', 'stroke-width': 6, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' })(),
-    ...zoneSegs.map(s => elNS('path', { d: s.d, fill: 'none', stroke: s.color, 'stroke-width': 6, opacity: 0.6 })()),
+  const svg = elNS('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'xMidYMid meet' })([
+    trackPath && elNS('path', { d: trackPath, fill: 'none', stroke: 'rgba(151, 175, 220, 0.10)', 'stroke-width': 10, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' })(),
+    trackPath && elNS('path', { d: trackPath, fill: 'none', stroke: '#33415e', 'stroke-width': 4.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' })(),
+    ...zoneSegs.map(s => elNS('path', { d: s.d, fill: 'none', stroke: s.color, 'stroke-width': 6, opacity: 0.7, 'stroke-linecap': 'round' })()),
     ...cars,
   ]);
 
@@ -66,7 +77,7 @@ export function TrackMap(state) {
       el('span.panel-title')('TRACK ', el('b', 'MAP')),
       marshalLegend(session),
     ),
-    el('div.panel-body.center')(svg),
+    el('div.panel-body.map-body')(svg),
   );
 }
 
@@ -116,7 +127,7 @@ function marshalSegments(session, trace, project) {
     const end = Math.min(trace.length, start + 20);
     const slice = trace.slice(start, end);
     if (slice.length < 2) continue;
-    const color = z.zoneFlag === 3 ? '#ffcc1f' : (z.zoneFlag === 2 ? '#4a90ff' : '#2ee06b');
+    const color = z.zoneFlag === 3 ? '#ffd21f' : (z.zoneFlag === 2 ? '#5b9dff' : '#3be081');
     out.push({
       color,
       d: 'M ' + slice.map(([x, y]) => project(x, y).map(n => n.toFixed(1)).join(' ')).join(' L '),
@@ -138,7 +149,8 @@ function elNS(tag, attrs) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [k, v] of Object.entries(attrs || {})) if (v != null) node.setAttribute(k, v);
     (Array.isArray(children) ? children : [children]).forEach(c => {
-      if (c == null) return;
+      if (c == null || c === false) return;
+      if (typeof c === 'function') c = c();
       node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
     });
     return node;

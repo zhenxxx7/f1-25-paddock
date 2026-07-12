@@ -24,12 +24,13 @@ export function ErsDamage(state) {
     el('div.panel-header')(el('span.panel-title')('ERS · FUEL · ', el('b', 'DAMAGE'))),
     el('div.panel-body')(
       // ---- ERS -------------------------------------------------------
-      st && el('div', { style: { marginBottom: '12px' } })(
+      st && el('div.section')(
+        el('div.section-title', 'Energy'),
         el('div.kv')(el('span.k', 'ERS STORE'), el('span.v', `${(st.ersStoreEnergy / 1e6).toFixed(2)} MJ`)),
-        bar(ersPct, '#b06bff'),
+        meter(ersPct, 'ers'),
         el('div.row2', { style: { marginTop: '6px' } })(
-          cell('DEPLOY', `${(st.ersDeployedThisLap / 1e6).toFixed(2)} MJ`, deployPct, '#00e0ff'),
-          cell('HARVEST', `${((st.ersHarvestedThisLapMGUK + st.ersHarvestedThisLapMGUH) / 1e6).toFixed(2)} MJ`, harvestPct, '#2ee06b'),
+          cell('DEPLOY', `${(st.ersDeployedThisLap / 1e6).toFixed(2)} MJ`, deployPct, 'deploy'),
+          cell('HARVEST', `${((st.ersHarvestedThisLapMGUK + st.ersHarvestedThisLapMGUH) / 1e6).toFixed(2)} MJ`, harvestPct, 'harvest'),
         ),
         el('div.kv', { style: { marginTop: '4px' } })(
           el('span.k', 'MODE'),
@@ -41,9 +42,10 @@ export function ErsDamage(state) {
         ),
       ),
       // ---- FUEL ------------------------------------------------------
-      st && el('div', { style: { marginBottom: '12px' } })(
+      st && el('div.section')(
+        el('div.section-title', 'Fuel'),
         el('div.kv')(el('span.k', 'FUEL'), el('span.v', `${st.fuelInTank.toFixed(2)} / ${st.fuelCapacity.toFixed(1)} kg`)),
-        bar(Math.min(100, (st.fuelInTank / Math.max(1, st.fuelCapacity)) * 100), '#ffcc1f'),
+        meter(Math.min(100, (st.fuelInTank / Math.max(1, st.fuelCapacity)) * 100), 'fuel'),
         el('div.kv', { style: { marginTop: '4px' } })(
           el('span.k', 'REMAINING'),
           el('span.v', `${st.fuelRemainingLaps.toFixed(2)} laps`),
@@ -54,25 +56,24 @@ export function ErsDamage(state) {
         ),
       ),
       // ---- DAMAGE ----------------------------------------------------
-      dmg && el('div')(
-        el('div.panel-title', { style: { marginBottom: '6px' } }, 'DAMAGE'),
+      dmg && el('div.section')(
+        el('div.section-title', 'Damage'),
         damageGrid(dmg),
       ),
     ),
   );
 }
 
-function bar(pct, color) {
-  return el('div.rpmbar', { style: { height: '8px', marginTop: '2px' } })(
-    el('div.seg', { style: { flex: `${pct}`, background: color, borderRight: 'none' } }),
-    el('div.seg', { style: { flex: `${100 - pct}`, background: 'transparent', borderRight: 'none' } }),
+function meter(pct, cls) {
+  return el('div.meter')(
+    el('div.meter-fill.' + cls, { style: { width: `${pct}%` } }),
   );
 }
 
-function cell(label, val, pct, color) {
+function cell(label, val, pct, cls) {
   return el('div.pedal')(
     el('div.label', label),
-    el('div.bar')(el('div.fill', { style: { width: `${pct}%`, background: color } })),
+    meter(pct, cls),
     el('div.val', val),
   );
 }

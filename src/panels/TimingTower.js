@@ -34,7 +34,8 @@ export function TimingTower(state) {
       : formatGap(lap.deltaToRaceLeaderMinutesPart, lap.deltaToRaceLeaderMSPart);
 
     const visualTyre = st?.visualTyreCompound;
-    const tyreColor = TYRE_COL[visualTyre] || '#555';
+    const tyreColor = TYRE_COL[visualTyre] || '#556070';
+    const tyreLetter = TYRE_LETTER[visualTyre] || '·';
 
     rows.push(
       el('div.tower-row' + (isWatch ? '.watch' : '') + (isPlayer ? '.player' : '') + (pitting ? '.pitting' : '') + (dnf ? '.dnf' : ''), {
@@ -43,7 +44,7 @@ export function TimingTower(state) {
         el('span.pos', String(lap.carPosition || (i + 1))),
         el('span.team-bar', { style: { background: teamColour(part.teamId) } }),
         el('span.name')(
-          el('span.tyre-dot', { style: { background: tyreColor } }),
+          el('span.tyre-badge', { style: { color: tyreColor } }, tyreLetter),
           driverDisplay(part),
           pitting ? el('span.tag.blue', 'PIT') : '',
           dnf ? el('span.tag.red', RESULT_STATUS[lap.resultStatus]) : '',
@@ -68,13 +69,16 @@ function driverDisplay(p) {
     : (p.name || `Player ${p.networkId}`);
 }
 
-// Visual tyre compound -> sidewall colour used on TV broadcasts.
+// Visual tyre compound -> sidewall colour + letter used on TV broadcasts.
 const TYRE_COL = {
-  16: '#e30613', 17: '#e30613', // soft (C3..C5 actual -> red band)
+  16: '#ff4d4d', 17: '#ff4d4d', // soft (C3..C5 actual -> red band)
   18: '#ffd200',                 // medium
   19: '#f0f0f0',                 // hard
-  20: '#0a84ff',                 // C0/hard-ish
-  21: '#e30613',
-  7: '#43b02a',                 // intermediate
-  8: '#0067b1',                 // wet
+  20: '#5b9dff',                 // C0/hard-ish
+  21: '#ff4d4d',
+  7: '#43d05a',                 // intermediate
+  8: '#3a8de0',                 // wet
+};
+const TYRE_LETTER = {
+  16: 'S', 17: 'S', 18: 'M', 19: 'H', 20: 'C', 21: 'S', 7: 'I', 8: 'W',
 };

@@ -57,19 +57,14 @@ async function openReplay(file) {
 }
 
 function showReplayModal(lap) {
-  const overlay = el('div', {
-    style: {
-      position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.8)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: '1000', padding: '24px',
-    },
+  const overlay = el('div.modal-overlay', {
     onclick: (e) => { if (e.target === overlay) overlay.remove(); },
   })();
 
-  const box = el('div.panel', { style: { width: '900px', maxHeight: '90vh', overflow: 'auto' } })(
+  const box = el('div.panel.modal')(
     el('div.panel-header')(
       el('span.panel-title')('REPLAY · ', el('b', `${trackName(lap.track)}`), ` · Lap ${lap.lapNumber} · ${formatLapTime(lap.lapTimeMs)}`),
-      el('span.tag', { onclick: () => overlay.remove(), style: { cursor: 'pointer' } }, 'CLOSE ✕'),
+      el('span.tag.modal-close', { onclick: () => overlay.remove() }, 'CLOSE ✕'),
     ),
     el('div.panel-body')(replayCanvas(lap)),
   );

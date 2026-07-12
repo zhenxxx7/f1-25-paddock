@@ -39,12 +39,21 @@ const state = {
 
 const subscribers = new Set();
 let rafScheduled = false;
+let lastNotify = 0;
+const MIN_FRAME_MS = 50; // cap full re-renders at ~20 fps; panels rebuild their whole DOM
 
 function scheduleNotify() {
   if (rafScheduled) return;
   rafScheduled = true;
   requestAnimationFrame(() => {
+    const now = performance.now();
+    const wait = MIN_FRAME_MS - (now - lastNotify);
+    if (wait > 0) {
+      setTimeout(() => { rafScheduled = false; scheduleNotify(); }, wait);
+      return;
+    }
     rafScheduled = false;
+    lastNotify = now;
     for (const fn of subscribers) {
       try { fn(state); } catch (e) { console.error(e); }
     }

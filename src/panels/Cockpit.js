@@ -43,8 +43,8 @@ export function Cockpit(state) {
         el('div')(
           pedals(t),
           el('div.kv-grid', { style: { marginTop: '12px' } })(
-            kv('LAP', lap ? String(lap.currentLapNum) : '--'),
-            kv('OF', state.session?.totalLaps ?? '--'),
+            kv('LAP', lap ? `${lap.currentLapNum} / ${state.session?.totalLaps ?? '--'}` : '--'),
+            kv('POS', lap ? `P${lap.carPosition}` : '--'),
             kv('LAST', lap ? formatLapTime(lap.lastLapTimeInMS) : '--'),
             kv('CURR', lap ? formatLapTime(lap.currentLapTimeInMS) : '--'),
             sectorRow('S1', lap?.sector1TimeMinutesPart, lap?.sector1TimeMSPart),
@@ -77,16 +77,20 @@ function rpmLedBar(bitValue, percent) {
     if (bitValue) on = (bitValue >> i) & 1;
     else on = (i / 15) < (percent / 100);
     const color = ledColor(i);
-    segs.push(el('div.seg', { style: { background: on ? color : 'transparent' } }));
+    segs.push(el('div.seg', {
+      style: on
+        ? { background: color, boxShadow: `0 0 7px ${color}` }
+        : { background: 'rgba(151,175,220,0.07)' },
+    }));
   }
   return el('div.rpmbar')(segs);
 }
 
 function ledColor(i) {
   // left green, middle yellow, right red (mirrors the real wheel).
-  if (i < 9) return '#2ee06b';
-  if (i < 13) return '#ffcc1f';
-  return '#ff3b3b';
+  if (i < 9) return '#3be081';
+  if (i < 13) return '#ffd21f';
+  return '#ff5252';
 }
 
 function pedals(t) {

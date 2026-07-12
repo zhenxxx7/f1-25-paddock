@@ -40,11 +40,18 @@ function tyreCell(label, w, t, dmg) {
 
   return el('div.tyre-cell')(
     el('div.corner', label),
-    el('div.temp', { style: { color: tempColor } }, `${surface}°C`),
-    el('div.faint', `inner ${inner}°C · brake ${brake}°C`),
-    el('div.psi', `${psi.toFixed(1)} PSI`),
-    wear != null ? el('div.wear', `wear ${Math.round(wear)}%`) : '',
-    el('div.faint', SURFACES[surfType] ?? `surf ${surfType}`),
+    el('div.temp', { style: { color: tempColor } }, `${surface}°`),
+    el('div.tyre-meta', `IN ${inner}° · BRK ${brake}°`),
+    el('div.psi', `${psi.toFixed(1)} psi · ${(SURFACES[surfType] ?? '?').toLowerCase()}`),
+    wear != null ? wearBar(wear) : '',
+  );
+}
+
+function wearBar(wear) {
+  const pct = Math.min(100, Math.round(wear));
+  const color = pct >= 60 ? 'var(--red)' : pct >= 35 ? 'var(--yellow)' : 'var(--green)';
+  return el('div.wear-bar', { title: `wear ${pct}%` })(
+    el('div.wear-fill', { style: { width: `${pct}%`, background: color } }),
   );
 }
 

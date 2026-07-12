@@ -13,7 +13,7 @@ export function InfoPanels(state) {
   return el('div.panel')(
     el('div.panel-header')(
       el('span.panel-title')('DATA ', el('b', 'BANK')),
-      el('div', { style: { display: 'flex', gap: '4px' } })(
+      el('div.tabs')(
         tabBtn('session', 'SESSION'),
         tabBtn('setup', 'SETUP'),
         tabBtn('grid', 'GRID'),
@@ -30,8 +30,7 @@ export function InfoPanels(state) {
 }
 
 function tabBtn(id, label) {
-  return el('span.tag', {
-    style: tab === id ? { color: 'var(--accent)', borderColor: 'var(--accent)', cursor: 'pointer' } : { cursor: 'pointer' },
+  return el('span.tab' + (tab === id ? '.active' : ''), {
     onclick: () => { tab = id; rerender(); },
   }, label);
 }
@@ -65,7 +64,7 @@ function sessionTab(state) {
       ['Time of Day', minsToClock(s.timeOfDay)],
       ['S2 Start', s.sector2LapDistanceStart ? `${s.sector2LapDistanceStart.toFixed(0)}m` : '--'],
     ]),
-    el('div.panel-title', { style: { margin: '14px 0 6px' } }, 'WEATHER FORECAST'),
+    el('div.section-title', { style: { margin: '14px 0 6px' } }, 'Weather Forecast'),
     forecast.length
       ? el('div.kv-grid')(
           forecast.map(f => el('div.kv')(

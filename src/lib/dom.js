@@ -31,18 +31,28 @@ function appendChildren(node, children) {
   for (const c of children) {
     if (c == null || c === false || c === true) continue;
     if (Array.isArray(c)) { appendChildren(node, c); continue; }
+    // A builder that was never invoked — call it to get its node.
+    if (typeof c === 'function') { appendChildren(node, [c()]); continue; }
     node.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(c) : c);
   }
 }
 
-export function el(tagSpec) {
+function isProps(v) {
+  return v != null && typeof v === 'object' && !(v instanceof Node) && !Array.isArray(v);
+}
+
+// Supports both call styles used across the panels:
+//   el('div.panel')(header, body)          — curried
+//   el('span.pos', '12')                   — direct children
+//   el('div.kv-grid', { style })(kv(), …)  — props first, children later
+export function el(tagSpec, ...args) {
   const [tag, ...classes] = tagSpec.split('.');
   const node = document.createElement(tag || 'div');
   if (classes.length) node.className = classes.join(' ');
-  return (propsOrFirstChild, ...rest) => {
+  const build = (propsOrFirstChild, ...rest) => {
     let props = null;
     let children;
-    if (propsOrFirstChild && typeof propsOrFirstChild === 'object' && !(propsOrFirstChild instanceof Node) && !Array.isArray(propsOrFirstChild)) {
+    if (isProps(propsOrFirstChild)) {
       props = propsOrFirstChild;
       children = rest;
     } else {
@@ -52,6 +62,10 @@ export function el(tagSpec) {
     appendChildren(node, children);
     return node;
   };
+  if (!args.length) return build;
+  // Only props supplied: apply them now, stay curried for children.
+  if (args.length === 1 && isProps(args[0])) { applyProps(node, args[0]); return build; }
+  return build(...args);
 }
 
 // Replace the contents of a root element with a freshly-built node.

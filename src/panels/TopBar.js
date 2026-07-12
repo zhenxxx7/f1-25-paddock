@@ -1,41 +1,52 @@
 import { el } from '../lib/dom.js';
 
-// Top status bar: logo, session breadcrumb, connection indicator.
+// Top status bar: brand block, session chips, watched driver, connection pill.
 export function TopBar(state) {
   const s = state.session;
   const watching = state.watchingCarIndex;
   const part = state.participants?.participants?.[watching];
   const conn = state.connected;
   const stale = state.lastPacketAt && (Date.now() - state.lastPacketAt > 3000);
+  const live = conn && !stale;
 
   return el('div.topbar')(
-    el('div.logo')('F1·25 ', el('span', 'PADDOCK')),
+    el('div.brand')(
+      el('span.brand-mark', 'F1·25'),
+      el('span.brand-name')('PADDOCK', el('span.brand-sub', 'LIVE TELEMETRY WALL')),
+    ),
     el('div.crumb')(
       s ? [
-        el('b', trackNameOf(s)),
-        '·',
-        el('span', sessionTypeOf(s)),
-        el('span', `L${s.totalLaps ?? '--'}`),
-        weatherOf(s),
-      ] : el('span.faint', 'awaiting telemetry…'),
+        chip('TRACK', trackNameOf(s)),
+        chip('SESSION', sessionTypeOf(s)),
+        chip('LAPS', String(s.totalLaps ?? '--')),
+        chip('WX', weatherOf(s)),
+      ] : el('span.faint.mono', 'awaiting telemetry…'),
     ),
-    part ? el('span.tag', { style: `color:${teamColour(part.teamId)}` }, driverOf(part)) : '',
     el('div.spacer')(),
-    el('div.conn')(
-      el('span.dot' + (conn && !stale ? '.live' : '')),
-      conn && !stale ? `LIVE · ${state.packetCount} pkt` : (conn ? 'STALLED' : 'OFFLINE'),
+    part ? el('span.chip.driver')(
+      el('span.chip-k', { style: `color:${teamColour(part.teamId)}` }, '●'),
+      el('span.chip-v', driverOf(part)),
+    ) : '',
+    el('div.conn' + (live ? '.live' : ''))(
+      el('span.dot' + (live ? '.live' : '')),
+      live ? `LIVE · ${state.packetCount}` : (conn ? 'STALLED' : 'OFFLINE'),
     ),
   );
 }
 
-import { trackName, SESSION_TYPES, WEATHER, teamColour } from '../lib/store.js';
+function chip(k, v) {
+  return el('span.chip')(el('span.chip-k', k), el('span.chip-v', v));
+}
+
+import { trackName, SESSION_TYPES, WEATHER, teamColour, driverName } from '../lib/store.js';
 function trackNameOf(s) { return s.trackId != null ? trackName(s.trackId) : 'Unknown'; }
 function sessionTypeOf(s) { return SESSION_TYPES[s.sessionType] ?? 'Session'; }
 function weatherOf(s) {
   const w = WEATHER[s.weather] ?? '';
   const t = s.trackTemperature ?? '--';
-  return el('span', `${w} ${t}°C`);
+  return `${w} · ${t}°C`;
 }
 function driverOf(p) {
-  return p.name || (p.driverId != null ? `Driver ${p.driverId}` : 'Player');
+  if (p.aiControlled) return driverName(p.driverId);
+  return p.name || (p.driverId != null ? driverName(p.driverId) : 'Player');
 }
