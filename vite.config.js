@@ -8,7 +8,8 @@ export default defineConfig({
   root: '.',
   publicDir: 'public',
   server: {
-    port: 5173,
+    // PORT lets a harness/tool assign the dev port; default stays 5173.
+    port: Number(process.env.PORT) || 5173,
     strictPort: true,
     // In dev, the WebSocket + lap API live on the Node backend.
     proxy: {

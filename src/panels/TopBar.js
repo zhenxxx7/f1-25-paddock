@@ -23,6 +23,7 @@ export function TopBar(state) {
       ] : el('span.faint.mono', 'awaiting telemetry…'),
     ),
     el('div.spacer')(),
+    state.badFormat ? el('span.tag.red', `UDP FORMAT ${state.badFormat} · SET 2025 IN GAME`) : '',
     part ? el('span.chip.driver')(
       el('span.chip-k', { style: `color:${teamColour(part.teamId)}` }, '●'),
       el('span.chip-v', driverOf(part)),

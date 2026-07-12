@@ -19,6 +19,7 @@ export {
 
 const state = {
   connected: false,
+  badFormat: null,        // non-2025 UDP format detected by the backend
   packetCount: 0,
   lastPacketAt: 0,
   playerCarIndex: 0,
@@ -38,26 +39,23 @@ const state = {
 };
 
 const subscribers = new Set();
-let rafScheduled = false;
+let notifyPending = false;
 let lastNotify = 0;
 const MIN_FRAME_MS = 50; // cap full re-renders at ~20 fps; panels rebuild their whole DOM
 
+// Timer-driven (not requestAnimationFrame) so the wall keeps updating while
+// the game has focus and the browser tab is backgrounded / on another monitor.
 function scheduleNotify() {
-  if (rafScheduled) return;
-  rafScheduled = true;
-  requestAnimationFrame(() => {
-    const now = performance.now();
-    const wait = MIN_FRAME_MS - (now - lastNotify);
-    if (wait > 0) {
-      setTimeout(() => { rafScheduled = false; scheduleNotify(); }, wait);
-      return;
-    }
-    rafScheduled = false;
-    lastNotify = now;
+  if (notifyPending) return;
+  notifyPending = true;
+  const wait = Math.max(0, MIN_FRAME_MS - (performance.now() - lastNotify));
+  setTimeout(() => {
+    notifyPending = false;
+    lastNotify = performance.now();
     for (const fn of subscribers) {
       try { fn(state); } catch (e) { console.error(e); }
     }
-  });
+  }, wait);
 }
 
 export function subscribe(fn) {
@@ -146,6 +144,10 @@ export function connect() {
       scheduleNotify();
     } else if (msg.type === 'packet') {
       applyPacket(msg.packetId, msg.packet);
+    } else if (msg.type === 'format') {
+      // Game is sending a UDP format we can't parse (wrong in-game setting).
+      state.badFormat = msg.format;
+      scheduleNotify();
     } else if (msg.type === 'lap-saved' || msg.type === 'replay') {
       // Panels subscribe to these via the event bus below.
       bus.emit(msg.type, msg.data);

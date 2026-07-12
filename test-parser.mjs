@@ -60,13 +60,13 @@ function header(w, packetId, playerCarIndex = 0) {
   w.u8(0);            // networkGame
   w.u8(2);            // numWeatherForecastSamples
   for (let i = 0; i < 64; i++) { // forecast samples (8 bytes each)
-    w.u8(0); w.u8(i*5); w.u8(0); w.i8(30); w.i8(0); w.i8(25); w.i8(0); w.u8(10);
+    w.u8(0); w.u8(Math.min(255, i * 5)); w.u8(0); w.i8(30); w.i8(0); w.i8(25); w.i8(0); w.u8(10);
   }
   w.u8(0);            // forecastAccuracy
   w.u8(95);           // aiDifficulty
   w.u32(1); w.u32(2); w.u32(3); // link identifiers
   w.u8(0); w.u8(0); w.u8(0); // pit window ideal/latest/rejoin
-  w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); // assists
+  w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); w.u8(0); // 7 assists (steer/brake/gearbox/pit/pitRelease/ers/drs)
   w.u8(0); w.u8(0); // racing line + type
   w.u8(15);           // gameMode (race)
   w.u8(1);            // ruleSet

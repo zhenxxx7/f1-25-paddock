@@ -67,6 +67,7 @@ export const FORMULA = {
 };
 
 export const GAME_MODES = {
+  0: 'Event Mode', 3: 'Grand Prix',
   4: 'Grand Prix', 5: 'Time Trial', 6: 'Splitscreen', 7: 'Online Custom',
   15: 'Online Weekly Event', 17: 'Story Mode', 27: 'My Team Career', 28: 'Driver Career',
   29: 'Career Online', 30: 'Challenge Career', 75: 'Story Mode (APXGP)', 127: 'Benchmark',

@@ -71,6 +71,16 @@ npm start
 Then open **http://localhost:3000** in any browser. Start (or resume) a session
 in F1 25 and the panels fill in within a second.
 
+If port 3000 is taken by something else, the server automatically walks to the
+next free port (3001, 3002, …) and prints the URL it chose. Set `HTTP_PORT` to
+pin it explicitly.
+
+> **Game updates / DLC:** season content updates for F1 25 (including 2026
+> content) keep the same UDP format `2025`, so they work unchanged. If the
+> game ever sends a different format — usually a wrong in-game setting — the
+> dashboard shows a red `UDP FORMAT … SET 2025 IN GAME` warning in the top bar
+> instead of failing silently.
+
 ### View from another device on your network
 
 Point F1 25's UDP IP at this PC's LAN address, then open
@@ -122,12 +132,18 @@ F1 25  ──UDP 20777──▶  Node backend (server/index.js)
 
 **"OFFLINE" or panels never fill in.**
 - Confirm UDP is enabled in F1 25 and the format is **2025** (Settings → Telemetry).
-- Confirm nothing else is already bound to port 20777 (only one app can listen).
+- A red **UDP FORMAT … SET 2025 IN GAME** tag in the top bar means telemetry is
+  arriving but with the wrong format setting — change it in-game and it clears
+  by itself.
+- Confirm nothing else is already bound to port 20777 (only one app can listen —
+  the server exits with a clear message if it can't bind).
 - If you changed the port, start the backend with `F1_UDP_PORT=<port> npm start`.
-- Check `http://localhost:3000/health` — it should return `{"ok":true,...}`.
+- Check `http://localhost:3000/health` (or whichever port the server printed) —
+  it should return `{"ok":true,...,"format":"2025"}`.
 
 **Values look wrong / garbled.** Make sure **UDP Format = 2025** in-game. This
-app implements the F1 25 spec; the 2023/2024 formats have different layouts.
+app implements the F1 25 spec; the 2023/2024 formats have different layouts and
+are rejected with the top-bar warning rather than parsed as garbage.
 
 **Track map is blank.** It traces the circuit from your car's world position
 over the first lap. Drive a full lap and it will appear.

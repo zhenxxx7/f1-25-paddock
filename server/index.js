@@ -38,6 +38,7 @@ const lastSent = {};
 
 // ---- state: latest snapshot per packet type -------------------------------
 const state = {
+  badFormat: null,      // set when the game sends a UDP format we can't parse
   playerCarIndex: 0,
   session: null,
   participants: null,
@@ -58,7 +59,10 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, udp: F1_UDP_PORT, clients: wss.clients.size }));
+    res.end(JSON.stringify({
+      ok: true, udp: F1_UDP_PORT, clients: wss.clients.size,
+      format: state.badFormat ? `unsupported:${state.badFormat}` : '2025',
+    }));
     return;
   }
 
@@ -141,6 +145,9 @@ async function serveStatic(req, res, url) {
 }
 
 const wss = new WebSocketServer({ server, path: '/ws' });
+// ws re-emits the HTTP server's errors here; binding failures are already
+// handled by listenHttp, so just keep the re-emit from crashing the process.
+wss.on('error', () => {});
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
@@ -159,6 +166,7 @@ function sendSnapshot(client) {
   snap.data.histories = state.histories;
   snap.data.tyreSets = state.tyreSets;
   snap.data.playerCarIndex = state.playerCarIndex;
+  snap.data.badFormat = state.badFormat;
   client.send(JSON.stringify(snap));
 }
 
@@ -174,9 +182,35 @@ wss.on('connection', (ws) => {
 
 // ---- UDP listener ---------------------------------------------------------
 const udp = createSocket('udp4');
-udp.on('error', (e) => console.error('[udp] error', e));
+udp.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n  UDP port ${F1_UDP_PORT} is already in use — another telemetry app is listening.`);
+    console.error(`  Close it, or run with F1_UDP_PORT=<port> and set the same port in F1 25's UDP settings.\n`);
+    process.exit(1);
+  }
+  console.error('[udp] error', e);
+});
 
 udp.on('message', (buf) => {
+  // The game stamps every packet with its UDP format (2025 for F1 25 and its
+  // season/DLC updates). Anything else means the in-game "UDP Format" setting
+  // is wrong (or a future game) — tell the dashboard instead of failing silently.
+  if (buf.length >= 2) {
+    const fmt = buf.readUInt16LE(0);
+    if (fmt !== 2025) {
+      if (state.badFormat !== fmt) {
+        state.badFormat = fmt;
+        console.warn(`[udp] receiving UDP format ${fmt}, need 2025 — in F1 25 set Settings > Telemetry > UDP Format = 2025`);
+        broadcast({ type: 'format', format: fmt });
+      }
+      return;
+    }
+    if (state.badFormat) {
+      state.badFormat = null;
+      broadcast({ type: 'format', format: null });
+    }
+  }
+
   const pkt = parsePacket(buf);
   if (!pkt || pkt.__error) return;
   const { header, ...rest } = pkt;
@@ -293,9 +327,36 @@ async function flushLap(idx, lapNum, lapTimeMs) {
 }
 
 // ---- boot -----------------------------------------------------------------
-server.listen(HTTP_PORT, () => {
-  console.log(`\n  F1 25 Paddock  ->  http://localhost:${HTTP_PORT}`);
-});
+// If the default HTTP port is taken (common: another dev server on 3000),
+// walk forward a few ports instead of crashing. An explicit HTTP_PORT is
+// respected strictly and fails loudly.
+const explicitHttpPort = !!process.env.HTTP_PORT;
+
+function listenHttp(port, attemptsLeft) {
+  const onListening = () => {
+    server.removeListener('error', onError);
+    console.log(`\n  F1 25 Paddock  ->  http://localhost:${port}`);
+    if (!explicitHttpPort && port !== HTTP_PORT) {
+      console.warn(`  (default port ${HTTP_PORT} was busy; for "npm run dev" restart with HTTP_PORT=${port} so the Vite proxy matches)`);
+    }
+  };
+  const onError = (e) => {
+    server.removeListener('listening', onListening);
+    if (e.code !== 'EADDRINUSE') throw e;
+    if (!explicitHttpPort && attemptsLeft > 0) {
+      console.warn(`  Port ${port} is busy -> trying ${port + 1}`);
+      listenHttp(port + 1, attemptsLeft - 1);
+      return;
+    }
+    console.error(`\n  Port ${port} is already in use. Pick another one:\n    HTTP_PORT=${port + 1} npm start\n`);
+    process.exit(1);
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(port);
+}
+
+listenHttp(HTTP_PORT, 10);
 udp.bind(F1_UDP_PORT, () => {
   console.log(`  UDP listener   ->  0.0.0.0:${F1_UDP_PORT}  (point F1 25 telemetry here)`);
   console.log(`  Recordings     ->  ${LAPS_DIR}\n`);
